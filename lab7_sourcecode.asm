@@ -14,6 +14,9 @@ reti
 ;submit/start
 rcall SUBMIT
 reti
+.org $0032 ;recieve usart
+rcall USARTREC
+
 INIT:
 	;setup sp
 	ldi gpr1, low(RAMEND)
@@ -93,7 +96,19 @@ S3JMP:
 S4JMP:
 	jmp STATE4
 
-
+USARTREC:
+	;save state
+	push gpr1
+	push gpr2
+	push gpr3
+	lds gpr1, UCSR1A ;get reciever data
+	ldi XL, low(LASTREC)
+	ldi XH, high(LASTREC)
+	st X, gpr1 ;put it into data memory for later
+	pop gpr3 ;restore state
+	pop gpr2
+	pop gpr1
+	reti
 
 
 LPMLOOP:
@@ -157,6 +172,7 @@ SUBMIT:
 	ld gpr1, X
 	cpi gpr1, 0
 	breq SUBMITS0
+
 SUBMITS0: ;always go to state 1 if we are in state 0
 	inc gpr1
 	st X, gpr1
@@ -166,7 +182,7 @@ SUBMITEND:
 	pop gpr3 ;restore state
 	pop gpr2
 	pop gpr1
-	rjmp MAIN
+	ret
 
 STATE0: ;display opening message 
 	;save state
@@ -249,4 +265,6 @@ CURRSTATE:
 CURRCHOICE:
 .byte 1
 OPPREADY:
+.byte 1
+LASTREC:
 .byte 1
