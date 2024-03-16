@@ -14,9 +14,14 @@ reti
 ;submit/start
 rcall SUBMIT
 reti
+.org $0028
+;timer overflow
+rcall TC1OF
+reti
+
 .org $0032 ;recieve usart
 rcall USARTREC
-
+reti
 INIT:
 	;setup sp
 	ldi gpr1, low(RAMEND)
@@ -66,6 +71,10 @@ INIT:
 	ldi XH, high(OPPREADY)
 	ldi gpr1, 0
 	st X, gpr1
+	ldi XL, low(COUNTDOWN)
+	ldi XH, high(COUNTDOWN)
+	ldi gpr1, 0 ;number of times the counter can overflow before the game ends
+	st X, gpr1
 	rcall LCDInit
 	sei ;global int enable
 	
@@ -95,6 +104,42 @@ S3JMP:
 	jmp STATE3
 S4JMP:
 	jmp STATE4
+
+TC1OF:
+	;save state
+	push gpr1
+	push gpr2
+	push gpr3
+	;load overflows from data memory
+	ldi XL, low(OVERFLOWS)
+	ldi XH, high(OVERFLOWS)
+	ld gpr1, X
+	;if out of overlows, reset and decrement COUNTDOWN
+	dec gpr1
+	brne ENDTC1OF
+	;if COUNTDOWN is 0 change state
+	;load COUNTDOWN
+	ldi XL, low(COUNTDOWN)
+	ldi XH, high(COUNTDOWN)
+	ld gpr1, X
+	dec gpr1
+	brne ENDTC1OF
+	;change state
+	ldi XL, low(CURRSTATE)
+	ldi XH, high(CURRSTATE)
+	ld gpr1, X
+	inc gpr1
+	st X, gpr1
+
+ENDTC1OF:
+	ldi gpr1, $97
+	sts TCNT1L, gpr1 ;reset timer
+	ldi gpr1, $98
+	sts TCNT1H, gpr1
+	pop gpr3 ;restore state
+	pop gpr2
+	pop gpr1
+	ret
 
 USARTREC:
 	;save state
@@ -176,6 +221,7 @@ SUBMIT:
 SUBMITS0: ;always go to state 1 if we are in state 0
 	inc gpr1
 	st X, gpr1
+	;send transmission to other device that you are ready
 	rjmp SUBMITEND
 
 SUBMITEND:
@@ -197,7 +243,7 @@ STATE0: ;display opening message
 	ldi XL, low(lcd_buffer_addr)
 	ldi XH, high(lcd_buffer_addr)
 
-	ldi gpr2, 16 ;loop counter
+	ldi gpr2, 32 ;loop counter
 	rcall LPMLOOP
 
 STATE0END:
@@ -219,7 +265,7 @@ STATE1:
 	ldi XL, low(lcd_buffer_addr)
 	ldi XH, high(lcd_buffer_addr)
 
-	ldi gpr2, 16 ;loop counter
+	ldi gpr2, 32 ;loop counter
 	rcall LPMLOOP
 	;check opponent status
 	ldi XL, low(OPPREADY)
@@ -232,6 +278,21 @@ STATE1:
 	ld gpr1, X
 	inc gpr1
 	st X, gpr1
+	;start the countdown now! (value for ~0.05 seconds = $9897)
+	ldi gpr1, $97
+	sts TCNT1L, gpr1
+	ldi gpr1, $98
+	sts TCNT1H, gpr1
+	;set countdown appropriately 
+	ldi XL, low(COUNTDOWN)
+	ldi XH, high(COUNTDOWN)
+	ldi gpr1, 4
+	st X, gpr1
+	;set overflows properly
+	ldi XL, low(OVERFLOWS)
+	ldi XH, high(OVERFLOWS)
+	ldi gpr1, 30
+	st X, gpr1
 
 STATE1END:
 	pop gpr3 ;restore state
@@ -239,13 +300,59 @@ STATE1END:
 	pop gpr1
 	rjmp MAIN	
 STATE2:
-	jmp MAIN
+	;save state
+	push gpr1
+	push gpr2
+	push gpr3
+	;load program memory into lcd buffer (print "GAME START"
+	ldi ZL, low(STATE2STR)
+	ldi ZH, high(STATE2STR)
+	rol ZL ;need to shift left because program memory only has 2^15 accessible words and the last bit is to select the byte in the word
+	rol ZH
+	ldi XL, low(lcd_buffer_addr)
+	ldi XH, high(lcd_buffer_addr)
+
+	ldi gpr2, 16 ;loop counter
+	rcall LPMLOOP
+	;get current move from data memory
+	ldi YL, low(CURRCHOICE)
+	ldi YH, high(CURRCHOICE)
+	ld gpr1, Y
+	;write a different string into the last 16 bytes of the lcd buffer corresponding to the correct choice
+	cpi gpr1, 'r' ;conditional branching
+	breq PRINTROCK
+	cpi gpr2, 'p'
+	breq PRINTPAPER
+	cpi gpr3, 's'
+	breq PRINTSCIZZ
+PRINTROCK: ;load different string based on data memory value
+	ldi ZL, low(ROCKSTR)
+	ldi ZH, high(ROCKSTR)
+	rjmp STATE2END
+PRINTPAPER:
+	ldi ZL, low(PAPERSTR)
+	ldi ZH, high(PAPERSTR)
+	rjmp STATE2END
+PRINTSCIZZ:
+	ldi ZL, low(SCIZZSTR)
+	ldi ZH, high(SCIZZSTR)
+	rjmp STATE2END
+
+STATE2END:
+	ldi gpr2, 16 ;write that string to the lcd buffer's last line. 
+	;we can do this without loading a different value into Z because LPMLOOP doesn't restore the state on purpose 
+	;so that we can write to the next line easily
+	rcall LPMLOOP
+	pop gpr3 ;restore state
+	pop gpr2
+	pop gpr1
+	rjmp MAIN	
 
 STATE3:
-	jmp MAIN
+	rjmp MAIN
 
 STATE4:
-	jmp MAIN
+	rjmp MAIN
 
 ;preset text
 ;opening 
@@ -254,8 +361,13 @@ STATE0STR:
 STATE1STR:
 .db "Ready. Waiting  For the opponent"
 STATE2STR:
-.db "Game start"
-
+.db "Game start	     "
+ROCKSTR:
+.db "Rock	     "
+PAPERSTR:
+.db "Paper	     "
+SCIZZSTR:
+.db "Scizzors	     "
 .include "lcddriver.asm"
 
 .dseg 
@@ -267,4 +379,8 @@ CURRCHOICE:
 OPPREADY:
 .byte 1
 LASTREC:
+.byte 1
+COUNTDOWN: ;tracks with leds, how many more 5 sec increments until out of time
+.byte 1
+OVERFLOWS: ;tracks tc1 overflows since last countdown reached 0
 .byte 1
