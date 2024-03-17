@@ -15,6 +15,8 @@
 
 .org $0000
 	rjmp INIT
+.org $0002
+	rcall CYCLE
 .org $0004
 	rcall SUBMIT
 	reti
@@ -61,6 +63,11 @@ INIT:
 	ldi XL, low(CURRSTATE) ;set default state
 	ldi XH, high(CURRSTATE)
 	ldi gpr1, 0
+	st X, gpr1
+	
+	ldi XL, low(CURRCHOICE) ;set default choice
+	ldi XH, high(CURRCHOICE)
+	ldi gpr1, 'r'
 	st X, gpr1
 
 	ldi XL, low(OPPREADY) ;set opponent ready to not ready (0)
@@ -165,7 +172,7 @@ STATE1: ;constantly poll to see if the opponent is ready
 	ldi YL, low(line1Start)
 	ldi YH, high(line1Start)
 
-	ldi gpr2, 16 ;loop counter
+	ldi gpr2, 32 ;loop counter
 	
  LPMLOOPS1:
 	lpm gpr1, Z+ ;get the next byte from program memory 
@@ -195,7 +202,69 @@ STATE2END:
 	pop gpr1
 	rjmp MAIN
 
+CYCLE:	;change what the current choice is 
+	;save state
+	push gpr1
+	push gpr2
+	push gpr3
+	push XL
+	push XH
+	;get state
+	ldi XL, low(CURRSTATE)
+	ldi XH, high(CURRSTATE)
+	ld gpr1, X
+	cpi gpr1, 2
+	brne CYCLEEND
+CYCLES2: ;state 2 is the state where we are actually playing the game which is the only time we want to be able to toggle choices 
+	;the state transitions are: rock -> paper -> scizzors -> rock = 'r' -> 'p' -> 's' -> 'r'
+	;get the current move first
+	ldi XL, low(CURRCHOICE)
+	ldi XH, high(CURRCHOICE)
+	ld gpr1, X
+	;transition to next state 
+	cpi gpr1, 'r' ;check which state encoding is in data memory
+	breq ROCKTOPAP 
+	cpi gpr1, 'p'
+	breq PAPTOSCIZZ
+	cpi gpr1, 's'
+	breq SCIZZTOROCK
+	rjmp CYCLEEND ;if for whatever reason none of the branches trigger jump to end to save time
+ROCKTOPAP: ;each transition is the same. change the value of gpr1 for later to the new state
+	ldi gpr1, 'p'
+	ldi ZL, low(PAPSTR<<1)
+	ldi ZH, high(PAPSTR<<1)
+	rjmp CYCLEEND
+PAPTOSCIZZ:
+	ldi gpr1, 's'
+	ldi ZL, low(SCIZZSTR<<1)
+	ldi ZH, high(SCIZZSTR<<1)
+	rjmp CYCLEEND
+SCIZZTOROCK:
+	ldi gpr1, 'r'
+	ldi ZL, low(ROCKSTR<<1)
+	ldi ZH, high(ROCKSTR<<1)
+	rjmp CYCLEEND
+	
+CYCLEEND:
+	st X, gpr1 ;putting this at cycle end instead of each branch saves program memory
+	ldi YL, low(line2Start)
+	ldi YH, high(line2Start)
 
+	ldi gpr2, 16 ;loop counter
+	
+LPMLOOPCYC:
+	lpm gpr1, Z+ ;get the next byte from program memory 
+	st Y+, gpr1 ;put it in the lcd buffer
+	dec gpr2 ;decrement loop counter
+	brne LPMLOOPCYC ;repeat loop if != 0
+	rcall LCDWrite
+
+	pop XH
+	pop XL
+	pop gpr3 ;restore state
+	pop gpr2
+	pop gpr1
+	ret
 
 SUBMIT:	
 	push gpr1 ;save state
@@ -224,7 +293,7 @@ SUBMITS0:
 
 	ldi gpr2, 32 ;loop counter
 	
- LPMLOOPSUB:
+LPMLOOPSUB:
 	lpm gpr1, Z+ ;get the next byte from program memory 
 	st Y+, gpr1 ;put it in the lcd buffer
 	dec gpr2 ;decrement loop counter
@@ -252,9 +321,17 @@ STATE1STR:
 .db "Ready. Waiting  For the opponent"
 STATE1STREND:
 STATE2STR:
-.db "Game Start      "
+.db "Game Start      Rock            "
 STATE2STREND:
-
+ROCKSTR:
+.db "Rock            "
+ROCKSTREND:
+PAPSTR:
+.db "Paper           "
+PAPSTREND:
+SCIZZSTR:
+.db "Scizzors        "
+SCIZZSTREND:
 .include "lcddriver.asm"
 
 
