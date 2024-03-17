@@ -9,7 +9,8 @@
 .equ CURRSTATE = $0300
 .equ OPPREADY = $0301
 .equ CURRCHOICE = $0302
-
+.equ OVERFLOWS = $0303
+.equ COUNTDOWN = $0304
 .include "m32U4def.inc"
 .cseg
 
@@ -19,6 +20,9 @@
 	rcall CYCLE
 .org $0004
 	rcall SUBMIT
+	reti
+.org $0028
+	rcall TC1OF
 	reti
 .org $0032 
 	rcall USARTREC
@@ -69,6 +73,21 @@ INIT:
 	ldi XH, high(CURRCHOICE)
 	ldi gpr1, 'r'
 	st X, gpr1
+	
+	ldi XL, low(OVERFLOWS) ;preset overflows
+	ldi XH, high(OVERFLOWS)
+	ldi gpr1, 30
+	st X, gpr1
+
+	ldi XL, low(COUNTDOWN) ;preset countdown
+	ldi XH, high(COUNTDOWN)
+	ldi gpr1, 4
+	st X, gpr1
+
+	ldi gpr1, 0b00000000;setup tc1
+	sts TCCR1A, gpr1
+	ldi gpr1, 0b00000010 ;use 1024 prescale
+	sts TCCR1B, gpr1
 
 	ldi XL, low(OPPREADY) ;set opponent ready to not ready (0)
 	ldi XH, high(OPPREADY)
@@ -139,6 +158,102 @@ TRANSLOOP:
 	pop gpr2
 	pop gpr1 ;restore state
 	ret
+;expects caller to put COUNTDOWN in gpr1
+UPDATELEDS:
+	;save state
+	push gpr1
+	push gpr2
+	;check what point in the countdown we are at
+	cpi gpr1, 4
+	breq LEDS4 
+	cpi gpr1, 3
+	breq LEDS3 
+	cpi gpr1, 2
+	breq LEDS2 
+	cpi gpr1, 1
+	breq LEDS1 
+	cpi gpr1, 0
+	breq LEDS0 
+LEDS4: ;drive the correct leds high
+	ldi gpr2, 0b11110000
+	out PORTB, gpr2
+	rjmp LEDEND
+LEDS3:
+	ldi gpr2, 0b01110000
+	out PORTB, gpr2
+	rjmp LEDEND
+LEDS2:
+	ldi gpr2, 0b00110000
+	out PORTB, gpr2
+	rjmp LEDEND
+LEDS1:
+	ldi gpr2, 0b00010000
+	out PORTB, gpr2
+	rjmp LEDEND
+LEDS0:
+	ldi gpr2, 0b00000000
+	out PORTB, gpr2
+	rjmp LEDEND
+
+LEDEND:
+	;restore state
+	pop gpr2
+	pop gpr1
+	ret
+TC1OF:
+	;save state
+	push gpr1
+	push gpr2
+	push gpr3
+	push XL
+	push XH
+	;get number of overflows from data memory
+	ldi XL, low(OVERFLOWS)
+	ldi XH, high(OVERFLOWS)
+	ld gpr1, X
+	;if out of overlows, reset and decrement COUNTDOWN
+	dec gpr1
+	;save new overflows to data memory
+	st X, gpr1
+	cpi gpr1, 0
+	brne RESTC1OF
+	;reset overflows to 30
+	ldi gpr1, 30
+	st X, gpr1
+	;if COUNTDOWN is 0 change state
+	;load COUNTDOWN
+	ldi XL, low(COUNTDOWN)
+	ldi XH, high(COUNTDOWN)
+	ld gpr1, X
+	dec gpr1
+	rcall UPDATELEDS ;update leds with new value
+	;store new COUNTDOWN in data memory
+	st X, gpr1
+	cpi gpr1, 0
+	brne RESTC1OF
+	;reset COUNTDOWN in case player wants to play again
+	ldi gpr1, 4
+	st X, gpr1
+	;change state
+	ldi XL, low(CURRSTATE)
+	ldi XH, high(CURRSTATE)
+	ld gpr1, X
+	ldi gpr1, 3
+	st X, gpr1
+	;load results base
+	rjmp ENDTC1OF ;don't reset timer if game is over
+RESTC1OF:
+	ldi gpr1, $8F
+	sts TCNT1H, gpr1
+	ldi gpr1, $97
+	sts TCNT1L, gpr1 ;reset timer
+ENDTC1OF:
+	pop XH
+	pop XL
+	pop gpr3 ;restore state
+	pop gpr2
+	pop gpr1
+	ret
 
 STATE1: ;constantly poll to see if the opponent is ready
 	push gpr1 ;save state
@@ -180,7 +295,16 @@ STATE1: ;constantly poll to see if the opponent is ready
 	dec gpr2 ;decrement loop counter
 	brne LPMLOOPS1 ;repeat loop if != 0
 	rcall LCDWrite
+	
+	ldi gpr1, 4 ;set leds in inital condition
+	rcall UPDATELEDS
 
+	ldi gpr1, 0b00000001 ;enable overflow interrupt
+	sts TIMSK1, gpr1
+	ldi gpr1, $8F
+	sts TCNT1H, gpr1
+	ldi gpr1, $97 ;set the timer to start counting down!
+	sts TCNT1L, gpr1 
 STATE1END:
 	pop ZH ;restore state
 	pop ZL
