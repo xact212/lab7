@@ -2,9 +2,8 @@
 .def gpr1 = r17
 .def gpr2 = r18
 .def gpr3 = r19
-
-;.equ CURRSTATE = $0057
-;.equ CURRCHOICE = $0058
+.equ CURRSTATE = $0300
+.equ CURRCHOICE = $0300
 .include "m32U4def.inc"
 
 .cseg
@@ -17,12 +16,12 @@ reti
 .org $0008 ;submit/start
 rcall SUBMIT
 reti
-.org $0028 ;timer overflow
-rcall TC1OF
-reti
-.org $0032 ;recieve usart
-rcall USARTREC
-reti
+;	.org $0028 ;timer overflow
+;	rcall TC1OF
+;	reti
+;	.org $0032 ;recieve usart
+;	rcall USARTREC
+;	reti
 .org $0056
 INIT:
 	;setup sp
@@ -63,7 +62,7 @@ INIT:
 	;write default value to data memory
 	ldi XL, low(CURRSTATE)
 	ldi XH, high(CURRSTATE)
-	ldi gpr1, 48
+	ldi gpr1, 0
 	st X, gpr1
 	ldi XL, low(CURRCHOICE)
 	ldi XH, high(CURRCHOICE)
@@ -122,6 +121,8 @@ TC1OF:
 	push gpr1
 	push gpr2
 	push gpr3
+	push XL
+	push XH
 	;load overflows from data memory
 	ldi XL, low(OVERFLOWS)
 	ldi XH, high(OVERFLOWS)
@@ -142,16 +143,14 @@ TC1OF:
 	ld gpr1, X
 	inc gpr1
 	st X, gpr1
-	pop gpr3 ;restore state
-	pop gpr2
-	pop gpr1
-	ret
-	
+		
 ENDTC1OF:
 	ldi gpr1, $97
 	sts TCNT1L, gpr1 ;reset timer
 	ldi gpr1, $98
 	sts TCNT1H, gpr1
+	pop XH
+	pop XL
 	pop gpr3 ;restore state
 	pop gpr2
 	pop gpr1
@@ -162,10 +161,14 @@ USARTREC:
 	push gpr1
 	push gpr2
 	push gpr3
+	push XL
+	push XH
 	lds gpr1, UCSR1A ;get reciever data
 	ldi XL, low(LASTREC)
 	ldi XH, high(LASTREC)
 	st X, gpr1 ;put it into data memory for later
+	pop XH
+	pop XL
 	pop gpr3 ;restore state
 	pop gpr2
 	pop gpr1
@@ -173,17 +176,31 @@ USARTREC:
 
 
 LPMLOOP:
+	push gpr1
+	push gpr2
+	push ZL
+	push ZH
+	push YL
+	push YH
 	lpm gpr1, Z+ ;get the next byte from program memory 
 	st Y+, gpr1 ;put it in the lcd buffer
 	dec gpr2 ;decrement loop counter
 	brne LPMLOOP ;repeat loop if != 0
 	rcall LCDWrite ;write the data to the lcd
+	pop YH
+	pop YL
+	pop ZH
+	pop ZL
+	pop gpr2
+	pop gpr1
 	ret
 CYCLE: ;change what the current choice is 
 	;save state
 	push gpr1
 	push gpr2
 	push gpr3
+	push XL
+	push XH
 	;get state
 	ldi XL, low(CURRSTATE)
 	ldi XH, high(CURRSTATE)
@@ -216,6 +233,8 @@ SCIZZTOROCK:
 	
 CYCLEEND:
 	st X, gpr1 ;putting this at cycle end instead of each branch saves program memory
+	pop XH
+	pop XL
 	pop gpr3 ;restore state
 	pop gpr2
 	pop gpr1
@@ -226,7 +245,10 @@ SUBMIT:
 	push gpr1
 	push gpr2
 	push gpr3
-
+	push XL
+	push XH
+	push YL
+	push YH
 	;get curr state
 	ldi XL, low(CURRSTATE)
 	ldi XH, high(CURRSTATE)
@@ -246,6 +268,10 @@ SUBMITS0: ;always go to state 1 if we are in state 0
 	rjmp SUBMITEND
 
 SUBMITEND:
+	pop YH
+	pop YL
+	pop XH
+	pop XL
 	pop gpr3 ;restore state
 	pop gpr2
 	pop gpr1
@@ -268,6 +294,10 @@ STATE1:
 	push gpr1
 	push gpr2
 	push gpr3
+	push ZL
+	push ZH
+	push XL
+	push XH
 	;load program memory into lcd buffer 
 	ldi ZL, low(STATE1STR<<1)
 	ldi ZH, high(STATE1STR<<1)
@@ -304,6 +334,10 @@ STATE1:
 	st X, gpr1
 
 STATE1END:
+	pop XH
+	pop XL
+	pop ZH
+	pop ZL
 	pop gpr3 ;restore state
 	pop gpr2
 	pop gpr1
@@ -313,6 +347,10 @@ STATE2:
 	push gpr1
 	push gpr2
 	push gpr3
+	push ZL
+	push ZH
+	push XL
+	push XH
 	;load program memory into lcd buffer (print "GAME START"
 	ldi ZL, low(STATE2STR)
 	ldi ZH, high(STATE2STR)
@@ -352,6 +390,10 @@ STATE2END:
 	;we can do this without loading a different value into Z because LPMLOOP doesn't restore the state on purpose 
 	;so that we can write to the next line easily
 	rcall LPMLOOP
+	pop XH
+	pop XL
+	pop ZH
+	pop ZL
 	pop gpr3 ;restore state
 	pop gpr2
 	pop gpr1
@@ -381,10 +423,6 @@ SCIZZSTR:
 
 .dseg 
 
-CURRSTATE:
-.byte 1
-CURRCHOICE:
-.byte 1
 OPPREADY:
 .byte 1
 LASTREC:
