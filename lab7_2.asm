@@ -311,6 +311,8 @@ OFS2RESP:
 OFS3RESP:
 	ldi gpr1, 4 ;switch to state 4 displays winner/loser
 	st X, gpr1
+	ldi gpr1, 4
+	rcall UPDATELEDS
 	;figure out who won/lost
 	ldi XL, low(CURRCHOICE) ;get the current choice
 	ldi XH, high(CURRCHOICE)
