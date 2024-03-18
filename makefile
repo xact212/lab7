@@ -1,8 +1,8 @@
 ASSM=avra
-PROJ=lab7_2
-OUTFN=lab7.hex
+PROJ=Zach_Lehman_and_Brendan_Cahill_Lab7_sourcecode
+OUTFN=Zach_Lehman_and_Brendan_Cahill_Lab7_sourcecode.hex
 AOPTIONS=-o ${OUTFN}
-INFN=lab7_2.asm
+INFN=Zach_Lehman_and_Brendan_Cahill_Lab7_sourcecode.asm
 hex:
 	$(ASSM) $(AOPTIONS) $(INFN) 
 	rm -f $(PROJ).obj $(PROJ).eep.hex
