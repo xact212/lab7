@@ -75,6 +75,11 @@ INIT:
 	ldi gpr1, 'r'
 	st X, gpr1
 	
+	ldi XL, low(OPPCHOICE) ;set default choice
+	ldi XH, high(OPPCHOICE)
+	ldi gpr1, 'r'
+	st X, gpr1
+	
 	ldi XL, low(OVERFLOWS) ;preset overflows
 	ldi XH, high(OVERFLOWS)
 	ldi gpr1, 30
@@ -87,16 +92,15 @@ INIT:
 
 	ldi gpr1, 0b00000000;setup tc1
 	sts TCCR1A, gpr1
-	ldi gpr1, 0b00000010 ;use 1024 prescale
+	ldi gpr1, 0b00000011 ;use 1024 prescale
 	sts TCCR1B, gpr1
-
+	
 	ldi XL, low(OPPREADY) ;set opponent ready to not ready (0)
 	ldi XH, high(OPPREADY)
 	ldi gpr1, 0
 	st X, gpr1
 
 	rcall LCDInit ;setup lcd
-	rcall LCDBackLightOn
 	rcall LCDClr
 
 	ldi ZL, low(STATE0STR<<1);load program memory into lcd buffer 
@@ -173,7 +177,7 @@ LPMREC:
 	brne LPMREC
 	rcall LCDWrite
 	;reset timer
-	ldi gpr1, $8F
+	ldi gpr1, $DF
 	sts TCNT1H, gpr1
 	ldi gpr1, $97
 	sts TCNT1L, gpr1 
@@ -238,12 +242,15 @@ LEDEND:
 	pop gpr1
 	ret
 TC1OF:
+	cli
 	;save state
 	push gpr1
 	push gpr2
 	push gpr3
 	push XL
 	push XH
+	push ZL
+	push ZH
 	;get number of overflows from data memory
 	ldi XL, low(OVERFLOWS)
 	ldi XH, high(OVERFLOWS)
@@ -253,7 +260,9 @@ TC1OF:
 	;save new overflows to data memory
 	st X, gpr1
 	cpi gpr1, 0
-	brne RESTC1OF
+	breq RESETTC1SKIP
+	rjmp RESTC1OF
+RESETTC1SKIP:
 	;reset overflows to 30
 	ldi gpr1, 30
 	st X, gpr1
@@ -267,7 +276,9 @@ TC1OF:
 	;store new COUNTDOWN in data memory
 	st X, gpr1
 	cpi gpr1, 0
-	brne RESTC1OF
+	breq RESETTC1SKIP2
+	rjmp RESTC1OF
+RESETTC1SKIP2:
 	;reset COUNTDOWN in case player wants to play again
 	ldi gpr1, 4
 	st X, gpr1
@@ -280,6 +291,8 @@ TC1OF:
 	breq OFS2RESP
 	cpi gpr1, 3
 	breq OFS3RESP
+	cpi gpr1, 4
+	breq OFS4RESP
 OFS2RESP:
 	ldi gpr1, 3 ;switch to state3 if in state 2 and countdwon is over
 	st X, gpr1
@@ -298,23 +311,84 @@ OFS2RESP:
 OFS3RESP:
 	ldi gpr1, 4 ;switch to state 4 displays winner/loser
 	st X, gpr1
-	rcall LCDClr
+	;figure out who won/lost
+	ldi XL, low(CURRCHOICE) ;get the current choice
+	ldi XH, high(CURRCHOICE)
+	ld gpr1, X
+	ldi XL, low(OPPCHOICE) ;get opponent choice
+	ldi XH, high(OPPCHOICE)
+	ld gpr2, X
+	ldi YL, low(line1Start)	;load lcd address
+	ldi YH, high(line1Start)	
+	ldi gpr3, 16
+	cpi gpr1, 'r' ;branch based on the current choice
+	breq PLCHOSEROCK
+	cpi gpr1, 'p' 
+	breq PLCHOSEPAP
+	cpi gpr1, 's' 
+	breq PLCHOSESCIZZ
+PLCHOSEROCK:
+	cpi gpr2, 'r' ;branch based on the opp choice
+	breq DRAW
+	cpi gpr2, 'p' 
+	breq LOST
+	cpi gpr2, 's' 
+	breq WON
+PLCHOSEPAP:
+	cpi gpr2, 'r' ;branch based on the opp choice
+	breq WON 
+	cpi gpr2, 'p' 
+	breq DRAW
+	cpi gpr2, 's' 
+	breq LOST
+PLCHOSESCIZZ:
+	cpi gpr2, 'r' ;branch based on the opp choice
+	breq LOST
+	cpi gpr2, 'p' 
+	breq WON
+	cpi gpr2, 's' 
+	breq DRAW
+
+WON:
+	ldi ZL, low(WINSTR<<1)
+	ldi ZH, high(WINSTR<<1)
+	rjmp DISPRES
+LOST:
+	ldi ZL, low(LOSESTR<<1)
+	ldi ZH, high(LOSESTR<<1)
+	rjmp DISPRES
+DRAW:
+	ldi ZL, low(DRAWSTR<<1)
+	ldi ZH, high(DRAWSTR<<1)
+DISPRES:
+	lpm gpr1, Z+ ;replace first line with result
+	st Y+, gpr1
+	dec gpr3
+	brne DISPRES
+	rcall LCDWrite
 	rjmp RESTC1OF
 OFS4RESP:
-	cli
 	;watchdog reset
-	rjmp OFS4RESP
+	ldi gpr1, (1<<WDCE) | (1<<WDE)
+	sts WDTCSR, gpr1
+	ldi gpr1, (1<<WDE) | (1<<WDP0) | (1<<WDP1)
+	sts WDTCSR, gpr1
+WDWAIT:
+	rjmp WDWAIT
 RESTC1OF:
-	ldi gpr1, $8F
+	ldi gpr1, $DF
 	sts TCNT1H, gpr1
 	ldi gpr1, $97
 	sts TCNT1L, gpr1 ;reset timer
 ENDTC1OF:
+	pop ZH
+	pop ZL
 	pop XH
 	pop XL
 	pop gpr3 ;restore state
 	pop gpr2
 	pop gpr1
+	sei
 	ret
 
 STATE1: ;constantly poll to see if the opponent is ready
@@ -363,7 +437,7 @@ STATE1: ;constantly poll to see if the opponent is ready
 
 	ldi gpr1, 0b00000001 ;enable overflow interrupt
 	sts TIMSK1, gpr1
-	ldi gpr1, $8F
+	ldi gpr1, $DF
 	sts TCNT1H, gpr1
 	ldi gpr1, $97 ;set the timer to start counting down!
 	sts TCNT1L, gpr1 
@@ -419,19 +493,19 @@ ROCKTOPAP: ;each transition is the same. change the value of gpr1 for later to t
 	ldi gpr1, 'p'
 	ldi ZL, low(PAPSTR<<1)
 	ldi ZH, high(PAPSTR<<1)
-	rjmp CYCLEEND
+	rjmp LPMCYCLE
 PAPTOSCIZZ:
 	ldi gpr1, 's'
 	ldi ZL, low(SCIZZSTR<<1)
 	ldi ZH, high(SCIZZSTR<<1)
-	rjmp CYCLEEND
+	rjmp LPMCYCLE
 SCIZZTOROCK:
 	ldi gpr1, 'r'
 	ldi ZL, low(ROCKSTR<<1)
 	ldi ZH, high(ROCKSTR<<1)
-	rjmp CYCLEEND
-	
-CYCLEEND:
+	rjmp LPMCYCLE
+
+LPMCYCLE:
 	st X, gpr1 ;putting this at cycle end instead of each branch saves program memory
 	ldi YL, low(line2Start)
 	ldi YH, high(line2Start)
@@ -444,7 +518,7 @@ LPMLOOPCYC:
 	dec gpr2 ;decrement loop counter
 	brne LPMLOOPCYC ;repeat loop if != 0
 	rcall LCDWrite
-
+CYCLEEND:
 	pop XH
 	pop XL
 	pop gpr3 ;restore state
@@ -518,6 +592,15 @@ PAPSTREND:
 SCIZZSTR:
 .db "Scizzors        "
 SCIZZSTREND:
+WINSTR:
+.db "You Won!        "
+WINSTREND:
+LOSESTR:
+.db "You Lost        "
+LOSESTREND:
+DRAWSTR:
+.db "Draw            "
+DRAWSTREND:
 .include "lcddriver.asm"
 
 
