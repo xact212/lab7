@@ -11,6 +11,7 @@
 .equ CURRCHOICE = $0302
 .equ OVERFLOWS = $0303
 .equ COUNTDOWN = $0304
+.equ OPPCHOICE = $0305
 .include "m32U4def.inc"
 .cseg
 
@@ -132,15 +133,51 @@ USARTREC:
 	lds gpr1, UDR1 ;get transmission from other board
 	;if transmission is #, save that opp is rady to data mem
 	cpi gpr1, '#'
-	brne NEWCHOICE 
+	brne NEWOPPCHOICE 
 	ldi XL, low(OPPREADY) ;save opp is ready
 	ldi XH, high(OPPREADY)
 	st X, gpr1
 	rjmp USARTRECEND
-NEWCHOICE:
-	ldi XL, low(CURRCHOICE) ;store new choice in data memory
-	ldi XH, high(CURRCHOICE)
-	st X, gpr1 
+NEWOPPCHOICE:
+	ldi XL, low(OPPCHOICE) ;store new choice in data memory
+	ldi XH, high(OPPCHOICE)
+	st X, gpr1
+	;if we are receieving a choice from the opponent it means the game is over
+	;display the opponents choice at the top and yours at the bottom
+	ldi gpr2, 16
+	ldi YL, low(line1Start)
+	ldi YH, high(line1Start)
+	cpi gpr1, 'r'
+	breq OPPROCK
+	cpi gpr1, 'p'
+	breq OPPPAP
+	cpi gpr1, 's'
+	breq OPPSCIZZ
+OPPROCK:
+	ldi ZL, low(ROCKSTR<<1)
+	ldi Zh, high(ROCKSTR<<1)
+	rjmp LPMREC
+OPPPAP:
+	ldi ZL, low(PAPSTR<<1)
+	ldi Zh, high(PAPSTR<<1)
+	rjmp LPMREC
+OPPSCIZZ:
+	ldi ZL, low(SCIZZSTR<<1)
+	ldi Zh, high(SCIZZSTR<<1)
+	rjmp LPMREC
+
+LPMREC:
+	lpm gpr1, Z+
+	st Y+, gpr1
+	dec gpr2
+	brne LPMREC
+	rcall LCDWrite
+	;reset timer
+	ldi gpr1, $8F
+	sts TCNT1H, gpr1
+	ldi gpr1, $97
+	sts TCNT1L, gpr1 
+
 	rjmp USARTRECEND
 USARTRECEND:
 	pop gpr2 ;restore state
@@ -234,14 +271,39 @@ TC1OF:
 	;reset COUNTDOWN in case player wants to play again
 	ldi gpr1, 4
 	st X, gpr1
-	;change state
+	;check state
 	ldi XL, low(CURRSTATE)
 	ldi XH, high(CURRSTATE)
 	ld gpr1, X
-	ldi gpr1, 3
+	;branch based on state
+	cpi gpr1, 2
+	breq OFS2RESP
+	cpi gpr1, 3
+	breq OFS3RESP
+OFS2RESP:
+	ldi gpr1, 3 ;switch to state3 if in state 2 and countdwon is over
 	st X, gpr1
-	;load results base
-	rjmp ENDTC1OF ;don't reset timer if game is over
+	;tell other board what your choice was
+	;get you choice 
+	ldi XL, low(CURRCHOICE)
+	ldi XH, high(CURRCHOICE)
+	ld gpr2, X
+	;transmit it
+	rcall USARTTRANS 
+	;reset to four leds on
+	ldi gpr1, 4
+	rcall UPDATELEDS
+	;only reset the timer when we have receieved a response (reset in interrupt when recieving)
+	rjmp ENDTC1OF 
+OFS3RESP:
+	ldi gpr1, 4 ;switch to state 4 displays winner/loser
+	st X, gpr1
+	rcall LCDClr
+	rjmp RESTC1OF
+OFS4RESP:
+	cli
+	;watchdog reset
+	rjmp OFS4RESP
 RESTC1OF:
 	ldi gpr1, $8F
 	sts TCNT1H, gpr1
